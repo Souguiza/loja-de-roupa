@@ -1,0 +1,19 @@
+# Dependências e builds
+**/node_modules/
+**/.next/
+**/.next-*/
+**/dist/
+**/*.tsbuildinfo
+
+# Segredos locais (mantenha os .env.example versionados)
+backend/.env
+backend/.env.*
+!backend/.env.example
+frontend/.env.local
+frontend/.env.*.local
+
+# Dados locais e cópias de banco, que podem conter dados pessoais
+backups/
+**/backups/
+*.dump
+*.log
