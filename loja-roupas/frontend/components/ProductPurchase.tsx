@@ -4,13 +4,14 @@ import { CSSProperties, useMemo, useState } from 'react';
 import { Garment } from '@/components/Garment';
 import { useCart } from '@/lib/cart';
 import { brl, sizeRank } from '@/lib/format';
+import { lowestAvailablePrice } from '@/lib/product-pricing.mjs';
 import type { Product } from '@/lib/types';
 
 const checkoutEnabled = process.env.NEXT_PUBLIC_CHECKOUT_ENABLED === 'true';
 
 export function ProductPurchase({ product, demo = false }: { product: Product; demo?: boolean }) {
   const { add, favorites, toggleFavorite } = useCart();
-  const [color, setColor] = useState(product.variants[0]?.color ?? '');
+  const [color, setColor] = useState(product.variants.find((variant) => variant.stockQty > 0)?.color ?? product.variants[0]?.color ?? '');
   const [size, setSize] = useState('');
   const [imageIndex, setImageIndex] = useState(0);
 
@@ -21,7 +22,7 @@ export function ProductPurchase({ product, demo = false }: { product: Product; d
   }, [product]);
   const options = product.variants.filter((variant) => variant.color === color).sort((a, b) => sizeRank(a.size) - sizeRank(b.size));
   const selected = options.find((variant) => variant.size === size);
-  const lowest = Math.min(...options.map((variant) => variant.priceCents), Number.POSITIVE_INFINITY);
+  const lowest = lowestAvailablePrice(options);
 
   const buy = () => {
     if (!selected || selected.stockQty <= 0) return;
@@ -53,7 +54,7 @@ export function ProductPurchase({ product, demo = false }: { product: Product; d
       <h1 id="pdp-name">{product.name}</h1>
       {product.ratingCount ? <a className="review-summary" href="#reviews" aria-label={`${product.ratingAverage?.toFixed(1)} de 5, ${product.ratingCount} avaliações verificadas`}>★ {product.ratingAverage?.toFixed(1)} <span>· {product.ratingCount} {product.ratingCount === 1 ? 'avaliação verificada' : 'avaliações verificadas'}</span></a> : <p className="review-summary review-empty">SEJA O PRIMEIRO A AVALIAR APÓS RECEBER</p>}
       <button type="button" className="dialog-favorite" aria-pressed={favorites.includes(product.id)} onClick={() => toggleFavorite(product.id)}>{favorites.includes(product.id) ? '♥ REMOVER DOS SALVOS' : '♡ SALVAR PEÇA'}</button>
-      <p className="pdp-price">{brl(selected?.priceCents ?? lowest)}</p>
+      <p className="pdp-price">{selected ? brl(selected.priceCents) : lowest !== null ? `A PARTIR DE ${brl(lowest)}` : 'ESGOTADO'}</p>
       <p className="pdp-payment-hint">Preço varia conforme a cor e o tamanho selecionados.</p>
       {product.description && <p className="pdp-description">{product.description}</p>}
 
@@ -64,7 +65,7 @@ export function ProductPurchase({ product, demo = false }: { product: Product; d
       <fieldset className="pdp-fieldset">
         <legend>TAMANHO <span>{size || 'SELECIONE'}</span></legend>
         <div className="size-options">{options.map((variant) => <button key={variant.id} type="button" aria-pressed={size === variant.size} disabled={variant.stockQty <= 0} onClick={() => setSize(variant.size)}>{variant.size}</button>)}</div>
-        <p className="stock-note">{selected ? (selected.stockQty <= 3 ? `SÓ ${selected.stockQty} NO DROP` : 'DISPONÍVEL NO DROP') : 'ESTOQUE ATUALIZADO POR VARIAÇÃO'}</p>
+        <p className="stock-note">{!options.some((variant) => variant.stockQty > 0) ? 'ESGOTADO NESTA COR' : selected ? (selected.stockQty <= 3 ? `SÓ ${selected.stockQty} NO DROP` : 'DISPONÍVEL NO DROP') : 'ESTOQUE ATUALIZADO POR VARIAÇÃO'}</p>
       </fieldset>
       {demo && <p role="status" className="demo-purchase-note">CATÁLOGO DEMONSTRATIVO: você pode testar a sacola, mas nenhum pedido ou pagamento será enviado.</p>}
       {!demo && !checkoutEnabled && <p role="status" className="demo-purchase-note">VENDAS EM PREPARAÇÃO: o catálogo está disponível, mas ainda não é possível criar pedidos ou pagamentos.</p>}

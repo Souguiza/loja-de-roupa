@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { Garment } from './Garment';
 import { useCart } from '@/lib/cart';
 import { brl, sizeRank } from '@/lib/format';
+import { lowestAvailablePrice } from '@/lib/product-pricing.mjs';
 import { BRAND } from '@/lib/brand';
 import { trackStoreEvent } from '@/lib/analytics-config';
 import type { Product, Variant } from '@/lib/types';
@@ -13,8 +14,7 @@ import type { Product, Variant } from '@/lib/types';
 type Sort = 'featured' | 'price-asc' | 'price-desc';
 const checkoutEnabled = process.env.NEXT_PUBLIC_CHECKOUT_ENABLED === 'true';
 
-const startingPrice = (product: Product) =>
-  Math.min(...product.variants.map((variant) => variant.priceCents), Number.POSITIVE_INFINITY);
+const startingPrice = (product: Product) => lowestAvailablePrice(product.variants);
 
 export function Rack({ products, demo, catalogUnavailable = false }: { products: Product[]; demo: boolean; catalogUnavailable?: boolean }) {
   const { add, favorites, toggleFavorite } = useCart();
@@ -44,8 +44,13 @@ export function Rack({ products, demo, catalogUnavailable = false }: { products:
       const matchesSize = sizeFilter === 'all' || product.variants.some((variant) => variant.size === sizeFilter && variant.stockQty > 0);
       return matchesCategory && matchesQuery && matchesSize;
     });
-    if (sort === 'price-asc') result.sort((a, b) => startingPrice(a) - startingPrice(b));
-    if (sort === 'price-desc') result.sort((a, b) => startingPrice(b) - startingPrice(a));
+    if (sort !== 'featured') result.sort((a, b) => {
+      const aPrice = startingPrice(a);
+      const bPrice = startingPrice(b);
+      if (aPrice === null) return bPrice === null ? a.name.localeCompare(b.name) : 1;
+      if (bPrice === null) return -1;
+      return sort === 'price-asc' ? aPrice - bPrice : bPrice - aPrice;
+    });
     return result;
   }, [products, category, query, sort, sizeFilter]);
 
@@ -82,13 +87,14 @@ export function Rack({ products, demo, catalogUnavailable = false }: { products:
   const variantsForColor = (selectedProduct?.variants ?? [])
     .filter((variant) => variant.color === color)
     .sort((a, b) => sizeRank(a.size) - sizeRank(b.size));
+  const selectedProductStartingPrice = selectedProduct ? startingPrice(selectedProduct) : null;
 
   const openProduct = (product: Product) => {
     const priceCents = startingPrice(product);
-    trackStoreEvent('view_item', { currency: 'BRL', value: Number.isFinite(priceCents) ? priceCents / 100 : undefined, items: [{ item_id: product.id, item_name: product.name, quantity: 1, price: Number.isFinite(priceCents) ? priceCents / 100 : undefined }] });
+    trackStoreEvent('view_item', { currency: 'BRL', value: priceCents === null ? undefined : priceCents / 100, items: [{ item_id: product.id, item_name: product.name, quantity: 1, price: priceCents === null ? undefined : priceCents / 100 }] });
     returnFocusRef.current = document.activeElement as HTMLElement;
     setSelectedProduct(product);
-    setColor(product.variants[0]?.color ?? '');
+    setColor(product.variants.find((variant) => variant.stockQty > 0)?.color ?? product.variants[0]?.color ?? '');
     setSize('');
   };
 
@@ -200,9 +206,9 @@ export function Rack({ products, demo, catalogUnavailable = false }: { products:
               <div className="product-meta">
                 <div><p className="product-category">{product.category.name} <span>·</span> {new Set(product.variants.map((variant) => variant.color)).size} CORES</p>
                   <h3><button type="button" onClick={() => openProduct(product)}>{product.name}</button></h3></div>
-                <p className="product-price">{Number.isFinite(price) ? brl(price) : '—'}</p>
+                <p className="product-price">{price !== null ? `A PARTIR DE ${brl(price)}` : 'ESGOTADO'}</p>
               </div>
-              <p className="product-installments">PREÇO POR VARIAÇÃO · ESTOQUE DO DROP</p>
+              <p className="product-installments">{available ? 'PREÇO POR VARIAÇÃO · ESTOQUE DO DROP' : 'SEM ESTOQUE DISPONÍVEL'}</p>
             </article>;
           })}
         </div> : <div className="no-results" role={catalogUnavailable ? 'alert' : 'status'}>
@@ -257,7 +263,7 @@ export function Rack({ products, demo, catalogUnavailable = false }: { products:
             <p className="product-category">{selectedProduct.category.name} <span>·</span> DROP 001</p>
             <button type="button" className="dialog-favorite" aria-pressed={favorites.includes(selectedProduct.id)} onClick={() => toggleFavorite(selectedProduct.id)}>{favorites.includes(selectedProduct.id) ? '♥ REMOVER DOS SALVOS' : '♡ SALVAR PEÇA'}</button>
             <h2 id="product-dialog-title">{selectedProduct.name}</h2>
-            <p className="dialog-price">{brl(selectedVariant?.priceCents ?? startingPrice(selectedProduct))}</p>
+            <p className="dialog-price">{selectedVariant ? brl(selectedVariant.priceCents) : selectedProductStartingPrice !== null ? `A PARTIR DE ${brl(selectedProductStartingPrice)}` : 'ESGOTADO'}</p>
             {selectedProduct.description && <p className="dialog-description">{selectedProduct.description}</p>}
             <fieldset className="variant-fieldset">
               <legend>ESCOLHA A COR <span>{color}</span></legend>
@@ -266,7 +272,7 @@ export function Rack({ products, demo, catalogUnavailable = false }: { products:
             <fieldset className="variant-fieldset">
               <legend>TAMANHO <span>{size || 'SELECIONE'}</span></legend>
               <div className="size-options">{variantsForColor.map((variant: Variant) => <button type="button" key={variant.id} aria-pressed={size === variant.size} disabled={variant.stockQty <= 0} onClick={() => setSize(variant.size)}>{variant.size}</button>)}</div>
-              <p className="stock-note">{selectedVariant ? (selectedVariant.stockQty <= 3 ? `SÓ ${selectedVariant.stockQty} NO DROP` : 'DISPONÍVEL NO DROP') : 'ESTOQUE LIMITADO POR TAMANHO'}</p>
+              <p className="stock-note">{!variantsForColor.some((variant) => variant.stockQty > 0) ? 'ESGOTADO NESTA COR' : selectedVariant ? (selectedVariant.stockQty <= 3 ? `SÓ ${selectedVariant.stockQty} NO DROP` : 'DISPONÍVEL NO DROP') : 'ESTOQUE LIMITADO POR TAMANHO'}</p>
             </fieldset>
             <button className="add-to-bag" type="button" disabled={!selectedVariant || selectedVariant.stockQty <= 0} onClick={() => addToBag()}>
               {demo ? selectedVariant ? 'TESTAR NA SACOLA' : 'ESCOLHA COR E TAMANHO' : selectedVariant ? 'COLOCAR NA SACOLA' : 'ESCOLHA COR E TAMANHO'} <span aria-hidden="true">↗</span>

@@ -40,11 +40,15 @@ export default async function ProductPage({ params }: Props) {
   const data = await loadProduct(slug);
   if (!data) notFound();
   const { product, demo } = data;
-  const prices = product.variants.map((variant) => variant.priceCents).filter(Number.isFinite);
+  const availablePrices = product.variants.filter((variant) => variant.stockQty > 0).map((variant) => variant.priceCents).filter(Number.isSafeInteger);
+  const prices = availablePrices.length > 0
+    ? availablePrices
+    : product.variants.map((variant) => variant.priceCents).filter(Number.isSafeInteger);
+  const lowPriceCents = prices.length ? Math.min(...prices) : null;
   const offers = {
     '@type': 'AggregateOffer',
     priceCurrency: 'BRL',
-    lowPrice: prices.length ? (Math.min(...prices) / 100).toFixed(2) : undefined,
+    lowPrice: lowPriceCents !== null ? (lowPriceCents / 100).toFixed(2) : undefined,
     highPrice: prices.length ? (Math.max(...prices) / 100).toFixed(2) : undefined,
     offerCount: prices.length,
     availability: product.variants.some((variant) => variant.stockQty > 0)
