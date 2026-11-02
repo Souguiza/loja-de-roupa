@@ -14,7 +14,7 @@ export function Favorites({ products }: { products: Product[] }) {
     const available = product.variants.some((variant) => variant.stockQty > 0);
     const price = lowestAvailablePrice(product.variants);
     return <article className="favorite-card" key={product.id}>
-      <Link className="favorite-visual" href={`/produto/${product.slug}`}><Garment shape={product.shape} fill={product.variants[0]?.colorHex ?? '#eceae6'} hasPrint={product.hasPrint} /><span>{available ? 'NO DROP' : 'ESGOTADO'}</span></Link>
+      <Link className="favorite-visual" href={`/produto/${product.slug}`}><Garment shape={product.shape} fill={product.variants.find((variant) => variant.stockQty > 0)?.colorHex ?? product.variants[0]?.colorHex ?? '#eceae6'} hasPrint={product.hasPrint} /><span>{available ? 'NO DROP' : 'ESGOTADO'}</span></Link>
       <div className="favorite-copy"><p>{product.category.name}</p><h2><Link href={`/produto/${product.slug}`}>{product.name}</Link></h2><strong>{price !== null ? `A PARTIR DE ${brl(price)}` : 'ESGOTADO'}</strong>
         <button type="button" onClick={() => toggleFavorite(product.id)} aria-label={`Remover ${product.name} dos salvos`}>REMOVER ×</button>
       </div>

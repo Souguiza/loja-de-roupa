@@ -87,7 +87,7 @@ export function Rack({ products, demo, catalogUnavailable = false }: { products:
   const variantsForColor = (selectedProduct?.variants ?? [])
     .filter((variant) => variant.color === color)
     .sort((a, b) => sizeRank(a.size) - sizeRank(b.size));
-  const selectedProductStartingPrice = selectedProduct ? startingPrice(selectedProduct) : null;
+  const selectedColorStartingPrice = lowestAvailablePrice(variantsForColor);
 
   const openProduct = (product: Product) => {
     const priceCents = startingPrice(product);
@@ -200,7 +200,7 @@ export function Rack({ products, demo, catalogUnavailable = false }: { products:
               <button type="button" className="product-visual" onClick={() => openProduct(product)} aria-label={`Ver detalhes de ${product.name}`}>
                 <span className="product-index">AGAPE / {String(index + 1).padStart(2, '0')}</span>
                 <span className="product-badge">{available ? 'DROP 001' : 'ESGOTADO'}</span>
-                <Garment shape={product.shape} fill={product.variants[0]?.colorHex ?? '#eceae6'} hasPrint={product.hasPrint} />
+                <Garment shape={product.shape} fill={product.variants.find((variant) => variant.stockQty > 0)?.colorHex ?? product.variants[0]?.colorHex ?? '#eceae6'} hasPrint={product.hasPrint} />
                 <span className="quick-view">VER PEÇA <b aria-hidden="true">↗</b></span>
               </button>
               <div className="product-meta">
@@ -263,7 +263,7 @@ export function Rack({ products, demo, catalogUnavailable = false }: { products:
             <p className="product-category">{selectedProduct.category.name} <span>·</span> DROP 001</p>
             <button type="button" className="dialog-favorite" aria-pressed={favorites.includes(selectedProduct.id)} onClick={() => toggleFavorite(selectedProduct.id)}>{favorites.includes(selectedProduct.id) ? '♥ REMOVER DOS SALVOS' : '♡ SALVAR PEÇA'}</button>
             <h2 id="product-dialog-title">{selectedProduct.name}</h2>
-            <p className="dialog-price">{selectedVariant ? brl(selectedVariant.priceCents) : selectedProductStartingPrice !== null ? `A PARTIR DE ${brl(selectedProductStartingPrice)}` : 'ESGOTADO'}</p>
+            <p className="dialog-price">{selectedVariant ? brl(selectedVariant.priceCents) : selectedColorStartingPrice !== null ? `A PARTIR DE ${brl(selectedColorStartingPrice)}` : 'ESGOTADO'}</p>
             {selectedProduct.description && <p className="dialog-description">{selectedProduct.description}</p>}
             <fieldset className="variant-fieldset">
               <legend>ESCOLHA A COR <span>{color}</span></legend>
