@@ -206,7 +206,7 @@ export function Rack({ products, demo, catalogUnavailable = false }: { products:
               <div className="product-meta">
                 <div><p className="product-category">{product.category.name} <span>·</span> {new Set(product.variants.map((variant) => variant.color)).size} CORES</p>
                   <h3><button type="button" onClick={() => openProduct(product)}>{product.name}</button></h3></div>
-                <p className="product-price">{price !== null ? `A PARTIR DE ${brl(price)}` : 'ESGOTADO'}</p>
+                <p className="product-price">{price !== null ? <><span>A PARTIR DE</span>{' '}<strong>{brl(price)}</strong></> : 'ESGOTADO'}</p>
               </div>
               <p className="product-installments">{available ? 'PREÇO POR VARIAÇÃO · ESTOQUE DO DROP' : 'SEM ESTOQUE DISPONÍVEL'}</p>
             </article>;

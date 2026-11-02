@@ -1,5 +1,5 @@
 'use client';
-import { ReactNode, useEffect, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { CartDrawer } from './CartDrawer';
 import { BRAND } from '@/lib/brand';
@@ -10,10 +10,14 @@ export function Shell({ children }: { children: ReactNode }) {
   const { count, favorites, setOpen } = useCart();
   const pathname = usePathname();
   const [panel, setPanel] = useState<'contato' | null>(null);
+  const contactTrigger = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!panel) return;
-    const previousFocus = document.activeElement as HTMLElement | null;
+    const activeElement = document.activeElement;
+    const previousFocus = activeElement instanceof HTMLElement && activeElement !== document.body
+      ? activeElement
+      : contactTrigger.current;
     const dialog = document.querySelector<HTMLElement>('.panel-box');
     const controls = () => [...(dialog?.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])') ?? [])];
     controls()[0]?.focus();
@@ -26,7 +30,11 @@ export function Shell({ children }: { children: ReactNode }) {
       else if (!e.shiftKey && document.activeElement === focusable.at(-1)) { e.preventDefault(); focusable[0].focus(); }
     };
     window.addEventListener('keydown', onKey);
-    return () => { window.removeEventListener('keydown', onKey); previousFocus?.focus(); };
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      if (previousFocus?.isConnected) previousFocus.focus();
+      else contactTrigger.current?.focus();
+    };
   }, [panel]);
 
   if (pathname.startsWith('/admin')) return <>{children}</>;
@@ -47,9 +55,9 @@ export function Shell({ children }: { children: ReactNode }) {
           <a href={dropHref}>LOJA</a>
           <a href={lookbookHref}>LOOKBOOK</a>
           <a href={searchHref}>BUSCA</a>
+          <button ref={contactTrigger} type="button" onClick={() => setPanel('contato')}>CONTATO</button>
         </nav>
         <div className="hright">
-          <button type="button" onClick={() => setPanel('contato')}>CONTATO</button>
           <a className="favorites-link" href="/favoritos" aria-label={`Peças salvas, ${favorites.length}`}>SALVOS <span>{favorites.length.toString().padStart(2, '0')}</span></a>
           <a className="owner-entry" href="/admin" aria-label="Acesso do lojista" title="Acesso do lojista">PAINEL</a>
           <button className="bag-button" type="button" onClick={() => setOpen(true)} aria-label={`Abrir sacola, ${count} itens`}>

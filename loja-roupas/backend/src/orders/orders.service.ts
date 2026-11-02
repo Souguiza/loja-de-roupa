@@ -66,7 +66,10 @@ export class OrdersService implements OnModuleInit {
     const items = this.shipping.normalizeItems(dto.items);
     const quote = await this.prisma.shippingQuote.findFirst({ where: { id: dto.shippingQuoteId, destinationCep: dto.address.cep, expiresAt: { gt: new Date() }, consumedAt: null } });
     if (!quote || JSON.stringify(quote.items) !== JSON.stringify(items)) throw new BadRequestException('Frete expirado ou diferente dos itens. Calcule novamente.');
-    const variants = await this.prisma.productVariant.findMany({ where: { id: { in: items.map((item) => item.variantId) }, active: true, product: { active: true } }, include: { product: true } });
+    const variants = await this.prisma.productVariant.findMany({
+      where: { id: { in: items.map((item) => item.variantId) }, active: true, product: { active: true, category: { active: true } } },
+      include: { product: true },
+    });
     if (variants.length !== items.length) throw new BadRequestException('Um ou mais itens não estão disponíveis.');
     const lines = items.map((item) => {
       const variant = variants.find((candidate) => candidate.id === item.variantId)!;
@@ -82,8 +85,11 @@ export class OrdersService implements OnModuleInit {
       if (consumed.count !== 1) throw new BadRequestException('Frete já utilizado. Calcule novamente.');
       const customer = await tx.customer.upsert({ where: { email: dto.email.toLowerCase() }, create: { name: dto.name, email: dto.email.toLowerCase(), phone: dto.phone || null }, update: { name: dto.name, phone: dto.phone || undefined } });
       for (const { item, variant } of lines) {
-        const changed = await tx.productVariant.updateMany({ where: { id: variant.id, priceCents: variant.priceCents, stockQty: { gte: item.quantity } }, data: { stockQty: { decrement: item.quantity } } });
-        if (changed.count !== 1) throw new BadRequestException('Estoque alterado. Atualize sua sacola.');
+        const changed = await tx.productVariant.updateMany({
+          where: { id: variant.id, active: true, priceCents: variant.priceCents, stockQty: { gte: item.quantity }, product: { active: true, category: { active: true } } },
+          data: { stockQty: { decrement: item.quantity } },
+        });
+        if (changed.count !== 1) throw new BadRequestException('Peça ou estoque alterado. Atualize sua sacola.');
       }
       let couponId: string | null = null;
       if (couponCode) {
@@ -128,7 +134,18 @@ export class OrdersService implements OnModuleInit {
       await this.cancelAndRestock(order.id);
       throw new ServiceUnavailableException('O Mercado Pago não conseguiu iniciar o pagamento. Tente novamente.');
     }
-    await this.prisma.payment.updateMany({ where: { orderId: order.id }, data: { providerPreferenceId: preference.id } });
+    try {
+      const linked = await this.prisma.payment.updateMany({
+        where: { orderId: order.id, provider: 'mercado_pago', status: 'PENDING', providerPreferenceId: null },
+        data: { providerPreferenceId: preference.id },
+      });
+      if (linked.count !== 1) throw new Error('Preferência não vinculada ao pagamento pendente.');
+    } catch {
+      // A preferência não chegou ao cliente. Feche o pedido e libere o estoque;
+      // se o banco estiver indisponível, o job de expiração tentará novamente.
+      try { await this.cancelAndRestock(order.id); } catch { /* O job de expiração reconcilia pedidos pendentes. */ }
+      throw new ServiceUnavailableException('Não foi possível concluir a preparação do pagamento. Tente novamente.');
+    }
     return { number: order.number, checkoutUrl: preference.init_point, publicToken: order.publicToken };
   }
 

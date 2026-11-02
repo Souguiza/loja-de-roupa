@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createHmac } = require('node:crypto');
-const { BadRequestException } = require('@nestjs/common');
+const { BadRequestException, ServiceUnavailableException } = require('@nestjs/common');
 const { OrdersService } = require('../dist/orders/orders.service.js');
 const { ShippingService } = require('../dist/shipping/shipping.service.js');
 
@@ -20,18 +20,25 @@ test('shipping quote item normalization aggregates duplicates and enforces per-v
 });
 
 function transactionalPrisma({ stockCount = 1, coupon = null } = {}) {
-  const calls = { decremented: 0, orderData: null, created: 0, couponUses: 0 };
+  const calls = { decremented: 0, decrementArgs: [], variantQuery: null, orderData: null, created: 0, couponUses: 0, canceled: 0, restocked: 0, preferenceWrites: [] };
   const tx = {
     shippingQuote: { updateMany: async () => ({ count: 1 }) },
     customer: { upsert: async () => ({ id: 'customer-1' }) },
-    productVariant: { updateMany: async (_args) => { calls.decremented++; return { count: stockCount }; } },
+    productVariant: {
+      updateMany: async (args) => { calls.decremented++; calls.decrementArgs.push(args); return { count: stockCount }; },
+      update: async () => { calls.restocked++; },
+    },
     coupon: { findUnique: async () => coupon, updateMany: async () => { calls.couponUses++; return { count: 1 }; } },
-    order: { create: async ({ data }) => { calls.orderData = data; calls.created++; return { id: 'order-1', number: 12, publicToken: 'public-order-token', ...data }; } },
+    order: {
+      findUnique: async () => ({ id: 'order-1', status: 'AWAITING_PAYMENT', couponId: null, items: [{ variantId: 'variant-1', quantity: 2 }] }),
+      updateMany: async () => { calls.canceled++; return { count: 1 }; },
+      create: async ({ data }) => { calls.orderData = data; calls.created++; return { id: 'order-1', number: 12, publicToken: 'public-order-token', ...data }; },
+    },
   };
   const prisma = {
     shippingQuote: { findFirst: async () => quote },
-    productVariant: { findMany: async () => [variant] },
-    payment: { updateMany: async () => ({ count: 1 }) },
+    productVariant: { findMany: async (args) => { calls.variantQuery = args; return [variant]; } },
+    payment: { updateMany: async (args) => { calls.preferenceWrites.push(args); return { count: 1 }; } },
     $transaction: async (callback) => callback(tx),
   };
   return { prisma, calls };
@@ -91,10 +98,28 @@ test('order uses current catalog price and selected shipping quote to create the
     assert.equal(calls.orderData.shippingQuoteId, quote.id);
     assert.equal(calls.orderData.items.create[0].unitPriceCents, 5000);
     assert.equal(calls.decremented, 1);
+    assert.deepEqual(calls.variantQuery.where.product, { active: true, category: { active: true } });
+    assert.deepEqual(calls.decrementArgs[0].where.product, { active: true, category: { active: true } });
+    assert.equal(calls.decrementArgs[0].where.active, true);
     assert.equal(preferencePayload.external_reference, 'order-1');
     assert.equal(preferencePayload.payment_methods.default_payment_method_id, 'pix');
     assert.equal(preferencePayload.items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0), 115);
+    assert.deepEqual(calls.preferenceWrites[0].where, { orderId: 'order-1', provider: 'mercado_pago', status: 'PENDING', providerPreferenceId: null });
+    assert.equal(calls.preferenceWrites[0].data.providerPreferenceId, 'preference-1');
     assert.equal(result.checkoutUrl, 'https://checkout.example.com/pay');
+  } finally { global.fetch = originalFetch; }
+});
+
+test('checkout fails closed and releases stock when the preference cannot be linked to its payment', async () => {
+  const { prisma, calls } = transactionalPrisma();
+  prisma.payment.updateMany = async () => ({ count: 0 });
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({ ok: true, json: async () => ({ id: 'preference-orphan', init_point: 'https://checkout.example.com/pay' }) });
+  try {
+    const service = new OrdersService(prisma, config, shipping);
+    await assert.rejects(service.create(baseDto), (error) => error instanceof ServiceUnavailableException && error.getStatus() === 503);
+    assert.equal(calls.canceled, 1);
+    assert.equal(calls.restocked, 1);
   } finally { global.fetch = originalFetch; }
 });
 
@@ -122,6 +147,7 @@ test('order aborts when conditional stock decrement loses a race', async () => {
     const service = new OrdersService(prisma, config, shipping);
     await assert.rejects(service.create(baseDto), (error) => error instanceof BadRequestException && error.getStatus() === 400);
     assert.equal(calls.created, 0);
+    assert.deepEqual(calls.decrementArgs[0].where.product, { active: true, category: { active: true } });
   } finally { global.fetch = originalFetch; }
 });
 
